@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install requests
+      - run: pip install requests pyyaml
 
       # Step 1: 现有的 [DEL-] / [PHASE-] 同步 (Bitable + 群消息)
       - name: Sync deliverable / phase commits to Feishu

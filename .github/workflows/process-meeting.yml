@@ -11,7 +11,6 @@ on:
     types: [opened, labeled, closed]
 
 permissions:
-  contents: write
   issues: write
 
 concurrency:
@@ -43,9 +42,6 @@ jobs:
       LLM_MODEL: deepseek-chat
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: dev
 
       - uses: actions/setup-python@v5
         with:
@@ -53,7 +49,7 @@ jobs:
           cache: pip
 
       - name: Install Python deps
-        run: pip install requests openai pydantic
+        run: pip install requests openai pydantic pyyaml
 
       - name: Parse issue form fields
         id: parse
@@ -86,50 +82,22 @@ jobs:
           REPO_NAME: ${{ github.repository }}
         run: python create_feishu_tasks.py
 
-      - name: Archive meeting metadata
+      - name: Archive to Feishu cloud doc
         id: archive
+        working-directory: scripts
         env:
           MEETING_TITLE: ${{ steps.parse.outputs.meeting_title }}
           MEETING_DATE: ${{ steps.parse.outputs.meeting_date }}
           FEISHU_URL: ${{ steps.parse.outputs.feishu_url }}
-        run: |
-          archive_path=$(python scripts/archive_meeting.py)
-          echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
-
-      - name: Commit archive to dev (并发安全 + fail-closed)
-        run: |
-          set -euo pipefail
-          git config user.name "meeting-bot"
-          git config user.email "meeting-bot@users.noreply.github.com"
-          git add .planning/
-          if git diff --cached --quiet; then
-            echo "ℹ️ 没有归档变更, 跳过 commit"
-            exit 0
-          fi
-          git commit -m "docs(meeting): 归档 issue #${ISSUE_NUMBER}"
-
-          # 防并发: 多个 meeting issue 同时跑会竞争 dev
-          # rebase + 重试最多 3 次, 任何一次最终失败必须 fail-closed
-          # (绝不能让飞书任务已建但归档没落盘)
-          attempt=0
-          max_attempts=3
-          until git push origin HEAD:dev; do
-            attempt=$((attempt + 1))
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::push to dev 重试 $max_attempts 次后仍失败"
-              exit 1
-            fi
-            echo "::warning::push 失败 (第 $attempt 次), 拉取 dev 最新内容后 rebase 重试"
-            git fetch origin dev
-            git rebase origin/dev
-          done
+          ACTION_ITEMS_JSON: ${{ steps.extract.outputs.action_items }}
+        run: python archive_meeting.py
 
       - name: Comment on issue and close
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TASK_COUNT: ${{ steps.tasks.outputs.task_count }}
           TASK_MD: ${{ steps.tasks.outputs.task_md }}
-          ARCHIVE_PATH: ${{ steps.archive.outputs.archive_path }}
+          ARCHIVE_URL: ${{ steps.archive.outputs.archive_url }}
         run: |
           comment_body=$(cat <<'COMMENT_EOF'
           ✅ 处理完成
@@ -140,15 +108,14 @@ jobs:
 
           ## 归档
 
-          [`ARCHIVE_PATH_PLACEHOLDER`](../tree/dev/ARCHIVE_PATH_PLACEHOLDER)
+          [飞书文档](ARCHIVE_URL_PLACEHOLDER)
 
           ---
           _由 process-meeting workflow 自动生成_
           COMMENT_EOF
           )
-          # 安全替换: 用 sed 把占位符换成 env 值, 避免在 heredoc 里直接展开 ${TASK_MD}
           comment_body="${comment_body//TASK_COUNT_PLACEHOLDER/${TASK_COUNT:-0}}"
           comment_body="${comment_body//TASK_MD_PLACEHOLDER/${TASK_MD:-_(无)_}}"
-          comment_body="${comment_body//ARCHIVE_PATH_PLACEHOLDER/${ARCHIVE_PATH}}"
+          comment_body="${comment_body//ARCHIVE_URL_PLACEHOLDER/${ARCHIVE_URL:-#}}"
           gh issue comment "$ISSUE_NUMBER" --body "$comment_body"
           gh issue close "$ISSUE_NUMBER"
