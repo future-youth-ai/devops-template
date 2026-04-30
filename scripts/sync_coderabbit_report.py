@@ -36,6 +36,8 @@ from urllib.parse import urlparse
 
 import requests
 
+import config_loader
+
 TIMEOUT = 15
 CODERABBIT_BOT = "coderabbitai[bot]"
 
@@ -242,7 +244,7 @@ def main() -> int:
         print(f"⏭️  跳过: {reason}")
         return 0
 
-    webhook = os.environ.get("FEISHU_WEBHOOK_URL")
+    webhook = config_loader.get("feishu", "webhook_url", env="FEISHU_WEBHOOK_URL")
     if not webhook:
         print("::warning::缺少 FEISHU_WEBHOOK_URL, 跳过推送")
         return 0
@@ -257,7 +259,7 @@ def main() -> int:
 
     # 如果配了 FEISHU_WEBHOOK_SECRET, 开启签名校验模式 (飞书自定义机器人的 "签名校验")
     # 否则走 "IP 白名单 / 关键词" 模式, 不带签名字段
-    webhook_secret = os.environ.get("FEISHU_WEBHOOK_SECRET")
+    webhook_secret = config_loader.get("feishu", "webhook_secret", env="FEISHU_WEBHOOK_SECRET")
     payload: dict = dict(card)
     if webhook_secret:
         timestamp = str(int(time.time()))

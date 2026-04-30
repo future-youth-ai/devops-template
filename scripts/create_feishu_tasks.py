@@ -1,19 +1,18 @@
-"""读 ACTION_ITEMS_JSON, 在飞书多维表格(需求池)创建记录, 维护 .planning/tasks.json 映射.
+"""读 ACTION_ITEMS_JSON, 在飞书多维表格(需求池)创建记录.
 
 环境变量:
-  FEISHU_APP_ID / FEISHU_APP_SECRET   必需
+  FEISHU_APP_ID / FEISHU_APP_SECRET   必需 (或 config.yml)
   ACTION_ITEMS_JSON                    必需 (extract step 的 JSON 数组字符串)
-  ISSUE_NUMBER                         必需 (用于 tasks.json 索引 key)
+  ISSUE_NUMBER                         必需
   MEETING_DATE                         可选 (YYYY-MM-DD, 用于填 提出日期)
   REPO_NAME                            可选 (owner/repo, 用于拼 GitHub issue 链接)
   GITHUB_OUTPUT                        可选 (写 record_ids / task_md 给下游 step)
-  FEISHU_BITABLE_APP_TOKEN             必需
-  FEISHU_BITABLE_TABLE_ID              必需
+  FEISHU_BITABLE_APP_TOKEN             必需 (或 config.yml)
+  FEISHU_BITABLE_TABLE_ID              必需 (或 config.yml)
 
 行为:
   - 对每个 item 调 bitable record create API 写入需求池
   - 字段映射: title→需求描述, due_date→预计交付日期, 进展状态→未启动
-  - 把 {issue#N: [{record_id, title, assignee_name, due_date}]} 写到 .planning/tasks.json
 """
 
 from __future__ import annotations
@@ -23,18 +22,14 @@ import os
 import sys
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 
 import requests
 from pydantic import BaseModel, Field, ValidationError
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+import config_loader
 from feishu_content import FEISHU_BASE, get_tenant_token
-
-# 锚定仓库根目录, 不依赖 cwd
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-TASKS_JSON_PATH = _REPO_ROOT / ".planning" / "tasks.json"
 
 
 def _build_session() -> requests.Session:
@@ -123,39 +118,6 @@ def create_bitable_record(
     return data.get("data", {}).get("record", {}).get("record_id", "")
 
 
-def load_tasks_map() -> dict:
-    """读 .planning/tasks.json, 不存在或脏数据则返回空 dict."""
-    if not TASKS_JSON_PATH.exists():
-        return {}
-    try:
-        data = json.loads(TASKS_JSON_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        print(
-            f"::warning::tasks.json 解析失败, 视作空 mapping: {e}",
-            file=sys.stderr,
-        )
-        return {}
-    if not isinstance(data, dict):
-        print(
-            f"::warning::tasks.json 顶层不是 dict (got {type(data).__name__}), 视作空",
-            file=sys.stderr,
-        )
-        return {}
-    cleaned: dict = {}
-    for k, v in data.items():
-        if isinstance(v, list):
-            cleaned[k] = [it for it in v if isinstance(it, dict)]
-    return cleaned
-
-
-def save_tasks_map(mapping: dict) -> None:
-    """落盘 .planning/tasks.json (sorted, indent=2 便于 diff)."""
-    TASKS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TASKS_JSON_PATH.write_text(
-        json.dumps(mapping, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-
 
 def main() -> int:
     items_raw = os.environ.get("ACTION_ITEMS_JSON", "[]")
@@ -180,8 +142,8 @@ def main() -> int:
         print("ℹ️ 没有合法 action items, 跳过任务创建")
         return 0
 
-    app_id = os.environ.get("FEISHU_APP_ID", "")
-    app_secret = os.environ.get("FEISHU_APP_SECRET", "")
+    app_id = config_loader.get("feishu", "app_id", env="FEISHU_APP_ID")
+    app_secret = config_loader.get("feishu", "app_secret", env="FEISHU_APP_SECRET")
     issue_num = os.environ.get("ISSUE_NUMBER", "")
     if not (app_id and app_secret and issue_num):
         print(
@@ -190,8 +152,8 @@ def main() -> int:
         )
         return 2
 
-    app_token = os.environ.get("FEISHU_BITABLE_APP_TOKEN", "")
-    table_id = os.environ.get("FEISHU_BITABLE_TABLE_ID", "")
+    app_token = config_loader.get("feishu", "bitable_app_token", env="FEISHU_BITABLE_APP_TOKEN")
+    table_id = config_loader.get("feishu", "bitable_table_id", env="FEISHU_BITABLE_TABLE_ID")
     if not (app_token and table_id):
         print(
             "::error::缺 FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID",
@@ -204,16 +166,8 @@ def main() -> int:
     repo_name = os.environ.get("REPO_NAME", "")
     issue_url = f"https://github.com/{repo_name}/issues/{issue_num}" if repo_name else ""
 
-    # 幂等: 检查已创建的记录, 按 title 跨 issue 去重
-    mapping = load_tasks_map()
-    key = f"issue#{issue_num}"
-    existing_titles = {e.get("title") for entries in mapping.values() for e in entries}
-
     created: list[dict] = []
     for item in items:
-        if item.get("title") in existing_titles:
-            print(f"  ⏭️ 跳过已存在: {item.get('title')}")
-            continue
         try:
             record_id = create_bitable_record(
                 tenant_token,
@@ -241,10 +195,7 @@ def main() -> int:
             )
             print(f"  ✅ {item.get('title')} -> {record_id}")
 
-    # 维护 tasks.json
-    mapping.setdefault(key, []).extend(created)
-    save_tasks_map(mapping)
-    print(f"已写 {TASKS_JSON_PATH}, key={key}, 新增 {len(created)} 条")
+    print(f"新增 {len(created)} 条飞书任务")
 
     # 输出给 workflow 下游 step
     gh_out = os.environ.get("GITHUB_OUTPUT")

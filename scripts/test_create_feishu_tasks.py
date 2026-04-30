@@ -41,11 +41,7 @@ def _set_required_env(monkeypatch, issue: str = "42"):
 
 
 @responses.activate
-def test_create_tasks_writes_mapping(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        create_feishu_tasks, "TASKS_JSON_PATH", tmp_path / ".planning" / "tasks.json"
-    )
-
+def test_create_tasks_success(monkeypatch) -> None:
     # mock token
     responses.add(
         responses.POST,
@@ -78,12 +74,8 @@ def test_create_tasks_writes_mapping(tmp_path, monkeypatch) -> None:
 
     rc = create_feishu_tasks.main()
     assert rc == 0
-
-    mapping = json.loads((tmp_path / ".planning/tasks.json").read_text())
-    assert "issue#42" in mapping
-    assert len(mapping["issue#42"]) == 2
-    assert mapping["issue#42"][0]["record_id"] == "rec-1"
-    assert mapping["issue#42"][1]["title"] == "写文档"
+    # token + 2 records
+    assert len(responses.calls) == 3
 
 
 def test_no_items_returns_zero(monkeypatch) -> None:
@@ -108,13 +100,10 @@ def test_missing_secrets_returns_2(monkeypatch) -> None:
 
 
 @responses.activate
-def test_due_date_with_explicit_tz_is_preserved(tmp_path, monkeypatch) -> None:
+def test_due_date_with_explicit_tz_is_preserved(monkeypatch) -> None:
     """due_date 含时区不应被覆盖成 UTC."""
     from datetime import datetime
 
-    monkeypatch.setattr(
-        create_feishu_tasks, "TASKS_JSON_PATH", tmp_path / ".planning" / "tasks.json"
-    )
     responses.add(
         responses.POST,
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
@@ -145,7 +134,7 @@ def test_due_date_with_explicit_tz_is_preserved(tmp_path, monkeypatch) -> None:
     assert int(body["fields"]["预计交付日期"]) == expected_ts_ms
 
 
-def test_invalid_action_items_filtered_by_pydantic(tmp_path, monkeypatch) -> None:
+def test_invalid_action_items_filtered_by_pydantic(monkeypatch) -> None:
     """ACTION_ITEMS_JSON 里非法 item 应被 pydantic 过滤掉, 全非法时返 0 不调外部."""
     monkeypatch.setenv(
         "ACTION_ITEMS_JSON",
@@ -165,12 +154,8 @@ def test_invalid_action_items_filtered_by_pydantic(tmp_path, monkeypatch) -> Non
 
 
 @responses.activate
-def test_one_failed_task_does_not_abort_batch(tmp_path, monkeypatch) -> None:
+def test_one_failed_task_does_not_abort_batch(monkeypatch) -> None:
     """单条 item 创建失败不应让整批失败."""
-    monkeypatch.setattr(
-        create_feishu_tasks, "TASKS_JSON_PATH", tmp_path / ".planning" / "tasks.json"
-    )
-
     responses.add(
         responses.POST,
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
@@ -194,58 +179,5 @@ def test_one_failed_task_does_not_abort_batch(tmp_path, monkeypatch) -> None:
 
     rc = create_feishu_tasks.main()
     assert rc == 0
-
-    mapping = json.loads((tmp_path / ".planning/tasks.json").read_text())
-    # 只有 2 条成功的入了映射
-    assert len(mapping["issue#1"]) == 2
-    assert {c["record_id"] for c in mapping["issue#1"]} == {"rec-ok", "rec-ok2"}
-
-
-@responses.activate
-def test_cross_issue_dedup(tmp_path, monkeypatch) -> None:
-    """已在其他 issue 创建过的同名任务应被跳过."""
-    tasks_json = tmp_path / ".planning" / "tasks.json"
-    tasks_json.parent.mkdir(parents=True)
-    tasks_json.write_text(
-        json.dumps(
-            {
-                "issue#10": [
-                    {
-                        "record_id": "rec-old",
-                        "title": "重复任务",
-                        "assignee_name": "张三",
-                        "due_date": None,
-                    },
-                ]
-            }
-        )
-    )
-    monkeypatch.setattr(create_feishu_tasks, "TASKS_JSON_PATH", tasks_json)
-
-    responses.add(
-        responses.POST,
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-        json={"code": 0, "tenant_access_token": "t-abc", "expire": 7200},
-    )
-    _mock_bitable_record("rec-new")
-
-    _set_required_env(monkeypatch, "20")
-    monkeypatch.setenv(
-        "ACTION_ITEMS_JSON",
-        json.dumps(
-            [
-                {"title": "重复任务"},  # 已存在于 issue#10, 应跳过
-                {"title": "新任务"},  # 新的, 应创建
-            ]
-        ),
-    )
-
-    rc = create_feishu_tasks.main()
-    assert rc == 0
-
-    mapping = json.loads(tasks_json.read_text())
-    # issue#20 只有新任务, 重复的被跳过
-    assert len(mapping["issue#20"]) == 1
-    assert mapping["issue#20"][0]["title"] == "新任务"
-    # issue#10 保持不变
-    assert len(mapping["issue#10"]) == 1
+    # token + 3 bitable calls (1 fail + 2 success)
+    assert len(responses.calls) == 4

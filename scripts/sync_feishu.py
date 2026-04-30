@@ -33,6 +33,8 @@ from typing import Any
 
 import requests
 
+import config_loader
+
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 TIMEOUT = 15
 
@@ -212,11 +214,11 @@ def handle_push() -> int:
 
         return update_feishu_task.main()
 
-    app_id = os.environ.get("FEISHU_APP_ID")
-    app_secret = os.environ.get("FEISHU_APP_SECRET")
-    bitable_app = os.environ.get("FEISHU_BITABLE_APP_TOKEN")
-    bitable_table = os.environ.get("FEISHU_BITABLE_TABLE_ID")
-    webhook = os.environ.get("FEISHU_WEBHOOK_URL")
+    app_id = config_loader.get("feishu", "app_id", env="FEISHU_APP_ID")
+    app_secret = config_loader.get("feishu", "app_secret", env="FEISHU_APP_SECRET")
+    bitable_app = config_loader.get("feishu", "bitable_app_token", env="FEISHU_BITABLE_APP_TOKEN")
+    bitable_table = config_loader.get("feishu", "bitable_table_id", env="FEISHU_BITABLE_TABLE_ID")
+    webhook = config_loader.get("feishu", "webhook_url", env="FEISHU_WEBHOOK_URL")
     sha = os.environ.get("COMMIT_SHA", "")
     repo = os.environ.get("REPO_NAME", "")
     actor = os.environ.get("ACTOR", "")

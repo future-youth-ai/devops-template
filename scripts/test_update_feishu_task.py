@@ -32,14 +32,7 @@ def test_done_tag_but_missing_secrets(monkeypatch) -> None:
 
 
 @responses.activate
-def test_done_tag_calls_update(monkeypatch, tmp_path) -> None:
-    tasks_json = tmp_path / ".planning" / "tasks.json"
-    monkeypatch.setattr(update_feishu_task, "TASKS_JSON", tasks_json)
-    tasks_json.parent.mkdir(parents=True)
-    tasks_json.write_text(
-        json.dumps({"issue#1": [{"record_id": "rec-abc12345-full", "title": "x"}]})
-    )
-
+def test_done_tag_calls_update(monkeypatch) -> None:
     responses.add(
         responses.POST,
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
@@ -55,46 +48,16 @@ def test_done_tag_calls_update(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
     monkeypatch.setenv("FEISHU_BITABLE_APP_TOKEN", "bitable-app")
     monkeypatch.setenv("FEISHU_BITABLE_TABLE_ID", "tbl-123")
-    # commit 里写短前缀 rec-abc12345, 应能匹配到 rec-abc12345-full
-    monkeypatch.setenv("COMMIT_MESSAGE", "fix: 修 bug [DONE-TASK-rec-abc12345]")
+    # record_id 直接从 tag 取, 不再走 tasks.json
+    monkeypatch.setenv("COMMIT_MESSAGE", "fix: 修 bug [DONE-TASK-recABC123]")
 
     assert update_feishu_task.main() == 0
     assert len(responses.calls) == 2  # token + PUT
 
 
 @responses.activate
-def test_unknown_task_warns_returns_failure(monkeypatch, tmp_path) -> None:
-    tasks_json = tmp_path / ".planning" / "tasks.json"
-    monkeypatch.setattr(update_feishu_task, "TASKS_JSON", tasks_json)
-    tasks_json.parent.mkdir(parents=True)
-    tasks_json.write_text(json.dumps({"issue#1": [{"record_id": "rec-real", "title": "x"}]}))
-
-    responses.add(
-        responses.POST,
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-        json={"code": 0, "tenant_access_token": "t-abc", "expire": 7200},
-    )
-
-    monkeypatch.setenv("FEISHU_APP_ID", "app")
-    monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
-    monkeypatch.setenv("FEISHU_BITABLE_APP_TOKEN", "bitable-app")
-    monkeypatch.setenv("FEISHU_BITABLE_TABLE_ID", "tbl-123")
-    monkeypatch.setenv("COMMIT_MESSAGE", "fix: x [DONE-TASK-nonexistent]")
-
-    # record 未找到 -> failures += 1 -> return 1
-    assert update_feishu_task.main() == 1
-    # 只有 token 调用, 没 PUT 调用
-    assert len(responses.calls) == 1
-
-
-@responses.activate
-def test_non_done_tag_updates_to_developing(monkeypatch, tmp_path) -> None:
+def test_non_done_tag_updates_to_developing(monkeypatch) -> None:
     """普通 [TASK-xxx] 应更新状态为 '开发中'."""
-    tasks_json = tmp_path / ".planning" / "tasks.json"
-    monkeypatch.setattr(update_feishu_task, "TASKS_JSON", tasks_json)
-    tasks_json.parent.mkdir(parents=True)
-    tasks_json.write_text(json.dumps({"issue#1": [{"record_id": "rec-abc", "title": "x"}]}))
-
     responses.add(
         responses.POST,
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
@@ -125,21 +88,7 @@ def test_non_done_tag_updates_to_developing(monkeypatch, tmp_path) -> None:
 
 
 @responses.activate
-def test_multiple_tasks_in_one_commit(monkeypatch, tmp_path) -> None:
-    tasks_json = tmp_path / ".planning" / "tasks.json"
-    monkeypatch.setattr(update_feishu_task, "TASKS_JSON", tasks_json)
-    tasks_json.parent.mkdir(parents=True)
-    tasks_json.write_text(
-        json.dumps(
-            {
-                "issue#1": [
-                    {"record_id": "rec-one", "title": "a"},
-                    {"record_id": "rec-two", "title": "b"},
-                ]
-            }
-        )
-    )
-
+def test_multiple_tasks_in_one_commit(monkeypatch) -> None:
     responses.add(
         responses.POST,
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
@@ -167,3 +116,26 @@ def test_multiple_tasks_in_one_commit(monkeypatch, tmp_path) -> None:
 
     assert update_feishu_task.main() == 0
     assert len(responses.calls) == 3  # token + 2 PUT
+
+
+@responses.activate
+def test_api_failure_returns_1(monkeypatch) -> None:
+    """飞书 API 返回错误时 failures += 1, 最终返回 1."""
+    responses.add(
+        responses.POST,
+        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        json={"code": 0, "tenant_access_token": "t-abc", "expire": 7200},
+    )
+    responses.add(
+        responses.PUT,
+        _BITABLE_RECORD_URL_RE,
+        json={"code": 1234, "msg": "not found"},
+    )
+
+    monkeypatch.setenv("FEISHU_APP_ID", "app")
+    monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
+    monkeypatch.setenv("FEISHU_BITABLE_APP_TOKEN", "bitable-app")
+    monkeypatch.setenv("FEISHU_BITABLE_TABLE_ID", "tbl-123")
+    monkeypatch.setenv("COMMIT_MESSAGE", "fix: x [DONE-TASK-nonexistent]")
+
+    assert update_feishu_task.main() == 1

@@ -18,6 +18,8 @@ from typing import Any
 
 import requests
 
+import config_loader
+
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 TIMEOUT = 30
 
@@ -42,8 +44,10 @@ def _get(path: str, token: str, params: dict | None = None) -> dict[str, Any]:
     return data  # type: ignore[no-any-return]
 
 
-def get_tenant_token(app_id: str, app_secret: str) -> str:
+def get_tenant_token(app_id: str = "", app_secret: str = "") -> str:
     """获取 tenant_access_token (有效期 2 小时, 调用方自己处理缓存)."""
+    app_id = app_id or config_loader.get("feishu", "app_id", env="FEISHU_APP_ID")
+    app_secret = app_secret or config_loader.get("feishu", "app_secret", env="FEISHU_APP_SECRET")
     r = requests.post(
         f"{FEISHU_BASE}/auth/v3/tenant_access_token/internal",
         json={"app_id": app_id, "app_secret": app_secret},

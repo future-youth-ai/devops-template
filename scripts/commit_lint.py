@@ -20,6 +20,8 @@ import re
 import subprocess
 import sys
 
+import config_loader
+
 # 交付物: [DEL-01] 或 [DEL-01][MVP] 或 [DEL-01][UAT] 等
 DELIVERABLE_PATTERN = re.compile(r"^\[DEL-\d+\](?:\[[A-Z][A-Z0-9_-]*\])?\s+\S.*$")
 
@@ -40,9 +42,11 @@ CONVENTIONAL_TYPES = (
     "ci",
     "revert",
 )
-CONVENTIONAL_PATTERN = re.compile(
-    rf"^(?:{'|'.join(CONVENTIONAL_TYPES)})(?:\([\w\-./]+\))?!?:\s+\S.*$"
-)
+def _build_conventional_pattern(types: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile(rf"^(?:{'|'.join(types)})(?:\([\w\-./]+\))?!?:\s+\S.*$")
+
+
+CONVENTIONAL_PATTERN = _build_conventional_pattern(CONVENTIONAL_TYPES)
 
 # 允许的 merge / revert 自动提交（由 GitHub 生成）
 MERGE_PATTERN = re.compile(r"^Merge (branch|pull request|remote-tracking)")
@@ -101,9 +105,17 @@ def validate_subject(subject: str) -> tuple[bool, str]:
 
 
 def main(argv: list[str]) -> int:
+    global CONVENTIONAL_PATTERN
     if len(argv) < 3:
         print("用法: commit_lint.py <BASE_SHA> <HEAD_SHA>", file=sys.stderr)
         return 2
+
+    # 从 config.yml 加载额外的 commit types
+    cfg = config_loader.load_config()
+    extra = cfg.get("commit", {}).get("extra_types", [])
+    if extra:
+        all_types = CONVENTIONAL_TYPES + tuple(extra)
+        CONVENTIONAL_PATTERN = _build_conventional_pattern(all_types)
 
     base, head = argv[1], argv[2]
     try:

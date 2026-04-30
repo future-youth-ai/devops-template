@@ -23,6 +23,8 @@ import sys
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
+import config_loader
+
 SYSTEM_PROMPT = "你是会议秘书。你只输出 JSON, 不输出任何解释或 markdown 标记。"
 
 USER_PROMPT_TEMPLATE = """从以下会议记录中提取所有"行动项 / 待办 / Action Item"。
@@ -104,9 +106,11 @@ def extract(
 
 def main() -> int:
     transcript = os.environ.get("TRANSCRIPT", "")
-    api_key = os.environ.get("LLM_API_KEY", "")
-    base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek-chat")
+    api_key = config_loader.get("llm", "api_key", env="LLM_API_KEY")
+    base_url = config_loader.get(
+        "llm", "base_url", env="LLM_BASE_URL", default="https://api.deepseek.com/v1"
+    )
+    model = config_loader.get("llm", "model", env="LLM_MODEL", default="deepseek-chat")
 
     if not api_key:
         print("::error::LLM_API_KEY 未设置", file=sys.stderr)
