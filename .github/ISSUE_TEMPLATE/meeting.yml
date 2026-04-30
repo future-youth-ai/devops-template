@@ -1,0 +1,48 @@
+name: 📝 处理会议记录
+description: 上传飞书会议链接, AI 自动抽取 action items 并在飞书创建任务
+title: "[Meeting] "
+labels: ["meeting"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 使用说明
+        - 把要处理的**飞书链接**（妙记 / 云文档 / Wiki）粘贴下来
+        - 应用必须有访问权限（已加入「会议纪要」知识库的资源默认可读）
+        - 提交后 GitHub Actions 自动运行, 1-2 分钟出结果
+
+  - type: input
+    id: meeting_title
+    attributes:
+      label: 会议标题
+      placeholder: 4月23日 项目立项会
+    validations:
+      required: true
+
+  - type: input
+    id: meeting_date
+    attributes:
+      label: 会议日期 (YYYY-MM-DD)
+      placeholder: "2026-04-23"
+    validations:
+      required: true
+
+  - type: input
+    id: feishu_url
+    attributes:
+      label: 飞书链接 (妙记/Docx/Wiki)
+      description: |
+        支持以下形态:
+        - https://meetings.feishu.cn/minutes/xxx (妙记, 推荐)
+        - https://*.feishu.cn/docx/xxx
+        - https://*.feishu.cn/docs/xxx (老版云文档)
+        - https://*.feishu.cn/wiki/xxx
+      placeholder: https://meetings.feishu.cn/minutes/abc123xyz
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 备注 (可选)
+      description: 任何想给 AI 的额外说明 (例如"重点关注前 30 分钟")

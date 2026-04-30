@@ -1,0 +1,154 @@
+name: Process Meeting Record
+
+# 安全设计:
+#   - 所有不可信 issue body 字段通过 env: 块注入, 不在 run: 里直接展开 (避免命令注入)
+#   - feishu_url 必须通过 scripts/feishu_url.py 白名单校验 (kind ∈ {minutes,docx,docs,wiki})
+#   - LLM 调用对 transcript 不做内容过滤, system prompt 强制 JSON 输出
+#   - 所有 secret 通过 GitHub Actions secret 注入, 不进 issue / 归档
+
+on:
+  issues:
+    types: [opened, labeled, closed]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  # 同一 issue 防并发跑
+  group: process-meeting-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  process:
+    # 幂等保护: 只在以下情况跑, 防止任意事件重复建任务
+    #   1. issue opened 且自带 meeting label (Issue Form 提交场景)
+    #   2. labeled 动作明确加的就是 meeting label (人工补 label 场景)
+    #   3. issue closed 且带 meeting label (手动关闭时仅归档, 排除 bot 自身关闭)
+    if: >
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'meeting')) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'meeting') ||
+      (github.event.action == 'closed' && github.actor != 'github-actions[bot]' && contains(github.event.issue.labels.*.name, 'meeting'))
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      FEISHU_BITABLE_APP_TOKEN: ${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
+      FEISHU_BITABLE_TABLE_ID: ${{ secrets.FEISHU_BITABLE_TABLE_ID }}
+      LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      LLM_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install requests openai pydantic
+
+      - name: Parse issue form fields
+        id: parse
+        working-directory: scripts
+        run: python parse_meeting_issue.py
+
+      - name: Fetch transcript from Feishu
+        if: github.event.action != 'closed'
+        id: fetch
+        working-directory: scripts
+        env:
+          FEISHU_URL: ${{ steps.parse.outputs.feishu_url }}
+        run: python fetch_transcript_for_workflow.py
+
+      - name: Extract action items via LLM
+        if: github.event.action != 'closed'
+        id: extract
+        working-directory: scripts
+        env:
+          TRANSCRIPT: ${{ steps.fetch.outputs.transcript }}
+        run: python extract_action_items.py
+
+      - name: Create Feishu tasks
+        if: github.event.action != 'closed'
+        id: tasks
+        working-directory: scripts
+        env:
+          ACTION_ITEMS_JSON: ${{ steps.extract.outputs.action_items }}
+          MEETING_DATE: ${{ steps.parse.outputs.meeting_date }}
+          REPO_NAME: ${{ github.repository }}
+        run: python create_feishu_tasks.py
+
+      - name: Archive meeting metadata
+        id: archive
+        env:
+          MEETING_TITLE: ${{ steps.parse.outputs.meeting_title }}
+          MEETING_DATE: ${{ steps.parse.outputs.meeting_date }}
+          FEISHU_URL: ${{ steps.parse.outputs.feishu_url }}
+        run: |
+          archive_path=$(python scripts/archive_meeting.py)
+          echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
+
+      - name: Commit archive to dev (并发安全 + fail-closed)
+        run: |
+          set -euo pipefail
+          git config user.name "meeting-bot"
+          git config user.email "meeting-bot@users.noreply.github.com"
+          git add .planning/
+          if git diff --cached --quiet; then
+            echo "ℹ️ 没有归档变更, 跳过 commit"
+            exit 0
+          fi
+          git commit -m "docs(meeting): 归档 issue #${ISSUE_NUMBER}"
+
+          # 防并发: 多个 meeting issue 同时跑会竞争 dev
+          # rebase + 重试最多 3 次, 任何一次最终失败必须 fail-closed
+          # (绝不能让飞书任务已建但归档没落盘)
+          attempt=0
+          max_attempts=3
+          until git push origin HEAD:dev; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::push to dev 重试 $max_attempts 次后仍失败"
+              exit 1
+            fi
+            echo "::warning::push 失败 (第 $attempt 次), 拉取 dev 最新内容后 rebase 重试"
+            git fetch origin dev
+            git rebase origin/dev
+          done
+
+      - name: Comment on issue and close
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TASK_COUNT: ${{ steps.tasks.outputs.task_count }}
+          TASK_MD: ${{ steps.tasks.outputs.task_md }}
+          ARCHIVE_PATH: ${{ steps.archive.outputs.archive_path }}
+        run: |
+          comment_body=$(cat <<'COMMENT_EOF'
+          ✅ 处理完成
+
+          ## 创建了 TASK_COUNT_PLACEHOLDER 个飞书任务
+
+          TASK_MD_PLACEHOLDER
+
+          ## 归档
+
+          [`ARCHIVE_PATH_PLACEHOLDER`](../tree/dev/ARCHIVE_PATH_PLACEHOLDER)
+
+          ---
+          _由 process-meeting workflow 自动生成_
+          COMMENT_EOF
+          )
+          # 安全替换: 用 sed 把占位符换成 env 值, 避免在 heredoc 里直接展开 ${TASK_MD}
+          comment_body="${comment_body//TASK_COUNT_PLACEHOLDER/${TASK_COUNT:-0}}"
+          comment_body="${comment_body//TASK_MD_PLACEHOLDER/${TASK_MD:-_(无)_}}"
+          comment_body="${comment_body//ARCHIVE_PATH_PLACEHOLDER/${ARCHIVE_PATH}}"
+          gh issue comment "$ISSUE_NUMBER" --body "$comment_body"
+          gh issue close "$ISSUE_NUMBER"

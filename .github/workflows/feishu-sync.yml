@@ -1,0 +1,59 @@
+name: Feishu Sync
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, closed, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  sync:
+    name: Sync to Feishu (飞书同步)
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' &&
+       (contains(github.event.head_commit.message, '[DEL-') ||
+        contains(github.event.head_commit.message, '[PHASE-') ||
+        contains(github.event.head_commit.message, '[TASK-') ||
+        contains(github.event.head_commit.message, '[DONE-TASK-')))
+    env:
+      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      FEISHU_BITABLE_APP_TOKEN: ${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
+      FEISHU_BITABLE_TABLE_ID: ${{ secrets.FEISHU_BITABLE_TABLE_ID }}
+      FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+      EVENT_NAME: ${{ github.event_name }}
+      COMMIT_SHA: ${{ github.sha }}
+      REPO_NAME: ${{ github.repository }}
+      ACTOR: ${{ github.actor }}
+      COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_STATE: ${{ github.event.pull_request.state }}
+      PR_MERGED: ${{ github.event.pull_request.merged }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+
+      # Step 1: 现有的 [DEL-] / [PHASE-] 同步 (Bitable + 群消息)
+      - name: Sync deliverable / phase commits to Feishu
+        run: python scripts/sync_feishu.py
+
+      # Step 2: 新增的 [TASK-xxx] / [DONE-TASK-xxx] 任务状态推进
+      # 只在 push 事件 + commit 含 TASK 标签时跑, PR 事件无 head_commit 跳过
+      - name: Update Feishu task status (推进 [TASK-xxx])
+        if: |
+          github.event_name == 'push' &&
+          (contains(github.event.head_commit.message, '[TASK-') ||
+           contains(github.event.head_commit.message, '[DONE-TASK-'))
+        run: python scripts/update_feishu_task.py
