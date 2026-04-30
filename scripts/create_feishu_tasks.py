@@ -118,7 +118,6 @@ def create_bitable_record(
     return data.get("data", {}).get("record", {}).get("record_id", "")
 
 
-
 def main() -> int:
     items_raw = os.environ.get("ACTION_ITEMS_JSON", "[]")
     try:

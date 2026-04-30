@@ -3,6 +3,7 @@
 读取优先级: 环境变量 > config.yml > 默认值.
 config.yml 只读一次, 结果缓存在模块级变量中.
 """
+
 from __future__ import annotations
 
 import os

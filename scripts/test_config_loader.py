@@ -1,4 +1,5 @@
 """config_loader 单测."""
+
 from __future__ import annotations
 
 import config_loader

@@ -27,8 +27,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - run: pip install "ruff==0.6.9"
-      - run: ruff check --output-format=github scripts
-      - run: ruff format --check scripts
+      - run: ruff check --config pyproject.toml --output-format=github scripts
+      - run: ruff format --config pyproject.toml --check scripts
 
   ci-gate:
     name: CI Gate

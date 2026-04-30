@@ -66,7 +66,9 @@ def main() -> int:
         print(f"::error::ISSUE_NUMBER 必须是纯数字 (got {issue_num!r})", file=sys.stderr)
         return 2
 
-    template_token = config_loader.get("feishu", "doc_template_token", env="FEISHU_DOC_TEMPLATE_TOKEN")
+    template_token = config_loader.get(
+        "feishu", "doc_template_token", env="FEISHU_DOC_TEMPLATE_TOKEN"
+    )
     if not template_token:
         print("::error::缺少 feishu.doc_template_token 配置", file=sys.stderr)
         return 2

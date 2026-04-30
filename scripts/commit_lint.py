@@ -42,6 +42,8 @@ CONVENTIONAL_TYPES = (
     "ci",
     "revert",
 )
+
+
 def _build_conventional_pattern(types: tuple[str, ...]) -> re.Pattern[str]:
     return re.compile(rf"^(?:{'|'.join(types)})(?:\([\w\-./]+\))?!?:\s+\S.*$")
 
