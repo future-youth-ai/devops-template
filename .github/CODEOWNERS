@@ -1,13 +1,8 @@
-# 默认兜底
-*                                  @jimmyhu213
+# 默认兜底 — 改为你的 GitHub 用户名
+*                                  @your-github-username
 
-# 仓库基础设施 - CI / 工作流 / 仓库级脚本
-/.github/                          @jimmyhu213
-/scripts/                          @jimmyhu213
-/.coderabbit.yaml                  @jimmyhu213
-/README.md                         @jimmyhu213
-
-# meeting_bot 子项目
-/meeting_bot/                      @jimmyhu213
-/meeting_bot/src/meeting_bot/feishu/ @jimmyhu213
-# /meeting_bot/src/meeting_bot/    @backend-team
+# 仓库基础设施
+/.github/                          @your-github-username
+/scripts/                          @your-github-username
+/.coderabbit.yaml                  @your-github-username
+/config.yml                        @your-github-username

@@ -1,49 +1,21 @@
-# 按路径自动给 PR 打标签 - monorepo 模式
+# 按路径自动给 PR 打标签
 
-# ---------- 项目标签 (一级分类) ----------
-"project/meeting_bot":
+"area/scripts":
   - changed-files:
       - any-glob-to-any-file:
-          - "meeting_bot/**"
+          - "scripts/**"
 
-"project/infra":
+"area/ci":
   - changed-files:
       - any-glob-to-any-file:
           - ".github/**"
-          - "scripts/**"
+
+"area/config":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "config.yml"
           - ".coderabbit.yaml"
           - ".gitignore"
-          - "README.md"
-
-# ---------- 功能标签 (二级分类) ----------
-"area/feishu":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "meeting_bot/src/meeting_bot/feishu/**"
-          - "scripts/sync_feishu.py"
-
-"area/webhook":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "meeting_bot/src/meeting_bot/main.py"
-          - "meeting_bot/src/meeting_bot/feishu/events.py"
-
-"area/pipeline":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "meeting_bot/src/meeting_bot/pipeline.py"
-
-"area/docker":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "meeting_bot/Dockerfile"
-          - "meeting_bot/docker-compose.yml"
-
-"area/tests":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "**/tests/**"
-          - "**/test_*.py"
 
 "area/docs":
   - changed-files:
@@ -51,9 +23,8 @@
           - "**/*.md"
           - "**/docs/**"
 
-"area/config":
+"area/tests":
   - changed-files:
       - any-glob-to-any-file:
-          - "**/pyproject.toml"
-          - "**/.pre-commit-config.yaml"
-          - "**/.env.example"
+          - "**/test_*.py"
+          - "**/tests/**"
