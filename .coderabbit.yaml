@@ -1,12 +1,11 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-# devops-sandbox monorepo
 
 language: zh-CN
 early_access: false
 tone_instructions: |
-  你是一位资深的 Python 后端工程审查员, 熟悉飞书开放平台。
+  你是一位资深的 Python 工程审查员。
   审查意见使用中文, 语气专业、直接、可执行。
-  优先级: 安全漏洞 > 数据合规 > 异步正确性 > 飞书 API > 性能 > 代码风格。
+  优先级: 安全漏洞 > 数据合规 > 正确性 > 性能 > 代码风格。
   给出具体的代码修改建议, 而不是抽象描述。
 
 reviews:
@@ -34,69 +33,31 @@ reviews:
     - "!**/coverage.xml"
 
   path_instructions:
-    # ========== 通用安全 (两个项目都适用) ==========
+    # ========== 通用安全 ==========
     - path: "**/*.py"
       instructions: |
         【安全检查 - 最高优先级】
-        1. OWASP Top 10: 检查 SQL 注入 (f-string/字符串拼接构造 SQL)、XSS、
-           SSRF、路径穿越 (open()/Path() 未校验)、不安全反序列化 (pickle/yaml.load)。
+        1. OWASP Top 10: 检查 SQL 注入、XSS、SSRF、路径穿越、不安全反序列化。
         2. 硬编码凭证: 搜索 api_key/secret/token/password 常量赋值;
-           检查是否有真实 Key 被写入代码 (应使用 os.environ / pydantic-settings SecretStr)。
+           检查是否有真实 Key 被写入代码 (应使用 os.environ / config_loader)。
         3. 输入校验: 所有外部输入必须经过 Pydantic 模型或显式校验
-           才能进入 SQL、shell、LLM prompt、飞书 API。
-
-    # ========== meeting_bot 子项目 ==========
-    - path: "meeting_bot/src/meeting_bot/feishu/**"
-      instructions: |
-        【飞书 API 使用】
-        1. tenant_access_token 必须缓存 + 提前刷新, 禁止每次调用都重新获取。
-        2. 所有 HTTP 调用必须有 timeout 和指数退避重试 (tenacity)。
-        3. 分页接口必须处理 has_more / page_token, 禁止只取第一页。
-        4. API 返回 code != 0 必须抛异常而非静默忽略。
-        5. 路径和权限 scope 变动大, 新接入接口请在注释里链出官方文档版本。
-
-    - path: "meeting_bot/src/meeting_bot/main.py"
-      instructions: |
-        【FastAPI webhook】
-        1. /webhook 端点必须立即 200, 重活进 BackgroundTasks 或外部队列。
-        2. 幂等: 同一 event_id 必须只处理一次, 即使 webhook 重试。
-        3. URL verification (challenge) 必须单独处理, 不走解密路径。
-        4. 异常必须捕获并记日志, 禁止把 500 返回给飞书 (会触发重试风暴)。
-
-    - path: "meeting_bot/src/meeting_bot/pipeline.py"
-      instructions: |
-        【Pipeline 编排】
-        1. 扇出的飞书操作必须并发 (asyncio.gather), 禁止串行。
-        2. 任何一步失败不得影响其他步骤, 用 return_exceptions=True。
-        3. 结果必须返回 PipelineResult 记录每步成功/失败, 方便观测。
-        4. 时间字段必须带时区 (datetime with tzinfo), 避免本地时区 bug。
-
-    - path: "meeting_bot/src/meeting_bot/feishu/events.py"
-      instructions: |
-        【webhook 安全】
-        1. AES 解密失败必须返回 400, 不得继续处理。
-        2. 签名验证必须 constant-time 比较, 防止时序攻击。
-        3. PKCS7 padding 长度必须校验 (1-16), 防止解密歧义。
+           才能进入 shell、LLM prompt、飞书 API。
 
     # ========== 通用性能 ==========
     - path: "**/*.py"
       instructions: |
         【性能检查】
-        1. N+1 查询: ORM 循环访问关联对象必须使用 select_related/joinedload。
-        2. 异步阻塞: async 函数内禁止调用同步阻塞 API (requests/time.sleep),
-           必须使用 httpx/asyncio.sleep; CPU 密集操作用 run_in_executor。
-        3. 大列表内存: 避免 list(queryset) 全量加载, 使用 iterator()/流式。
-        4. 缓存: 计算重、结果稳定的函数考虑 functools.lru_cache 或 Redis。
+        1. 避免 N+1 调用模式: 循环内的 HTTP/DB 调用应批量化。
+        2. 大列表内存: 避免全量加载, 使用 iterator/流式处理。
+        3. 缓存: 计算重、结果稳定的函数考虑 functools.lru_cache。
 
     # ========== 测试质量 ==========
-    - path: "**/tests/**"
+    - path: "**/test_*.py"
       instructions: |
         【测试质量】
         1. 测试必须有明确的 arrange-act-assert 结构。
-        2. 禁止使用 sleep/time-based 同步, 使用 pytest fixture 或 event。
-        3. 外部 HTTP 调用必须用 respx/httpx_mock, 禁止真连飞书或其他服务。
-        4. async 测试必须带 @pytest.mark.asyncio 或用 asyncio_mode=auto。
-        5. 关键分支覆盖优先于行覆盖率。
+        2. 外部 HTTP 调用必须用 responses/respx mock, 禁止真连外部服务。
+        3. 关键分支覆盖优先于行覆盖率。
 
   tools:
     ruff:
