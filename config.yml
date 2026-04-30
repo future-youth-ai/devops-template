@@ -1,0 +1,26 @@
+# config.yml — 项目配置
+# 使用模板后，填写以下字段即可启用全部自动化
+# 密钥 (FEISHU_APP_ID/APP_SECRET 等) 从 org-level GitHub Secrets 继承，无需在此配置
+# 仓库级 Secrets 可覆盖组织默认值 (同名即覆盖)
+
+project:
+  name: "my-project"                    # 项目名称，用于飞书通知标题
+  language: "python"                     # 主语言 (MVP 仅支持 python)
+
+# 飞书集成
+feishu:
+  bitable_app_token: ""                  # 多维表格 app token
+  bitable_table_id: ""                   # 任务表 table ID
+  summary_chat_id: ""                    # 通知群 chat ID
+  doc_template_token: ""                 # 会议归档文档模板 token
+
+# LLM (会议行动项提取)
+llm:
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"
+
+# commit 规范
+commit:
+  delivery_tracking: true                # 启用 [DEL-xx] / [PHASE-x] 交付物追踪
+  task_sync: true                        # 启用 [TASK-xxx] 飞书任务状态同步
+  extra_types: []                        # 额外允许的 conventional commit types
